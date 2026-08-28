@@ -67,6 +67,10 @@ Then restart `pnpm dev`.
 
 Groq Compound can execute its built-in web search, website visit, and code interpreter tools. Each local agent definition lists allowed tools, and the Groq adapter maps that list to the closest built-in Groq tools.
 
+Compound uses other Groq models behind the scenes. In the Groq organization limits page, enable both `groq/compound` and `meta-llama/llama-4-scout-17b-16e-instruct`. If Compound selects a blocked or temporarily unavailable internal model, the app automatically falls back to `openai/gpt-oss-120b` for that agent.
+
+The fallback is intentionally conservative for lower Groq quotas. The filings researcher performs one browser-search pass, and the remaining agents analyze the shared evidence. This prevents a single run from launching several large browser sessions.
+
 Groq pricing can change. For accurate dashboard cost estimates, set the current prices from your Groq account:
 
 ```dotenv

@@ -164,6 +164,28 @@ describe("research runs", () => {
     expect(completed.usage.requests).toBe(7);
   });
 
+  test("a provider can ask the durable queue to wait longer", async () => {
+    const server = await createServer({
+      databasePath: ":memory:",
+      provider: new ProviderDelayProvider(30),
+      worker: {
+        concurrency: 1,
+        pollIntervalMs: 1,
+        retryBaseDelayMs: 5,
+        retryMaxDelayMs: 10,
+      },
+    });
+    servers.push(server);
+
+    const runId = await createRun(server, "Power semiconductors");
+    const completed = await waitForCompletedRun(server, runId);
+    const retryEvent = completed.events.find(
+      (event: { type: string }) => event.type === "run.retrying",
+    );
+
+    expect(retryEvent.message).toBe("Retry 2 scheduled in 30ms.");
+  });
+
   test("the worker pool never exceeds its concurrency limit", async () => {
     const provider = new ConcurrencyTrackingProvider(8);
     const server = await createServer({
@@ -311,6 +333,26 @@ class FlakyProvider implements ResearchProvider {
     }
 
     return this.delegate.runAgent(input);
+  }
+}
+
+class ProviderDelayProvider implements ResearchProvider {
+  readonly version = "provider-delay-v1";
+  readonly delegate = new SimulatedResearchProvider({ delayMs: 1 });
+  private shouldFail = true;
+
+  constructor(private readonly retryAfterMs: number) {}
+
+  async runAgent(input: Parameters<ResearchProvider["runAgent"]>[0]) {
+    if (!this.shouldFail) {
+      return this.delegate.runAgent(input);
+    }
+
+    this.shouldFail = false;
+    const { RetryableProviderError } = await import("../src/server/domain.js");
+    throw new RetryableProviderError("The provider asked us to wait.", {
+      retryAfterMs: this.retryAfterMs,
+    });
   }
 }
 

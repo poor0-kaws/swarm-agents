@@ -95,4 +95,11 @@ export interface ResearchProvider {
 
 export class RetryableProviderError extends Error {
   readonly retryable = true;
+  readonly retryAfterMs: number | null;
+
+  constructor(message: string, options?: { retryAfterMs?: number }) {
+    super(message);
+    this.name = "RetryableProviderError";
+    this.retryAfterMs = options?.retryAfterMs ?? null;
+  }
 }

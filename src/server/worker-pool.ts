@@ -94,7 +94,7 @@ export class WorkerPool {
       const message = error instanceof Error ? error.message : "Research provider failed.";
 
       if (error instanceof RetryableProviderError && job.attempts < job.max_attempts) {
-        this.scheduleRetry(job, message);
+        this.scheduleRetry(job, message, error.retryAfterMs);
         return;
       }
 
@@ -102,11 +102,12 @@ export class WorkerPool {
     }
   }
 
-  private scheduleRetry(job: QueueJob, message: string) {
-    const delayMs = Math.min(
+  private scheduleRetry(job: QueueJob, message: string, providerDelayMs: number | null) {
+    const exponentialDelayMs = Math.min(
       this.options.retryBaseDelayMs * 2 ** (job.attempts - 1),
       this.options.retryMaxDelayMs,
     );
+    const delayMs = Math.max(exponentialDelayMs, providerDelayMs ?? 0);
     const now = this.options.now();
     const availableAt = new Date(now.getTime() + delayMs).toISOString();
 
