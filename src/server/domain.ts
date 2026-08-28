@@ -1,50 +1,29 @@
-export const researchDepths = ["quick", "standard", "deep"] as const;
+import type {
+  Finding,
+  ResearchDepth,
+  ResearchReport,
+  ReuseKind,
+  RunStatus,
+  SourceReference,
+} from "../shared/contracts.js";
 
-export type ResearchDepth = (typeof researchDepths)[number];
-
-export const runStatuses = [
-  "queued",
-  "running",
-  "retrying",
-  "completed",
-  "failed",
-] as const;
-
-export type RunStatus = (typeof runStatuses)[number];
-
-export type ReuseKind = "cached" | "deduplicated" | null;
+export {
+  researchDepths,
+  runStatuses,
+  type BatchSummary,
+  type Finding,
+  type ResearchDepth,
+  type ResearchReport,
+  type ReuseKind,
+  type RunStatus,
+  type SourceReference,
+  type UsageSummary,
+} from "../shared/contracts.js";
 
 export interface ResearchRequest {
   industry: string;
   question: string;
   depth: ResearchDepth;
-}
-
-export interface Finding {
-  title: string;
-  detail: string;
-  confidence: "low" | "medium" | "high";
-}
-
-export interface SourceReference {
-  title: string;
-  url: string;
-  sourceType: string;
-  publishedAt: string;
-}
-
-export interface ResearchReport {
-  executiveSummary: string;
-  findings: Finding[];
-  risks: string[];
-  sources: SourceReference[];
-}
-
-export interface UsageSummary {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
 }
 
 export interface ResearchRun {
@@ -54,6 +33,7 @@ export interface ResearchRun {
   depth: ResearchDepth;
   fingerprint: string;
   status: RunStatus;
+  currentAgent: string | null;
   reuseKind: ReuseKind;
   sourceRunId: string | null;
   report: ResearchReport | null;

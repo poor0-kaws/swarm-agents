@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { createServer } from "./app.js";
@@ -10,9 +11,13 @@ import { SimulatedResearchProvider } from "./providers/simulated-provider.js";
 const port = readNumber("API_PORT", 4100);
 const host = process.env.API_HOST ?? "127.0.0.1";
 const provider = createProvider();
+const builtDashboard = resolve("dist");
 const server = await createServer({
   databasePath: process.env.DATABASE_PATH ?? resolve("data/research-swarm.sqlite"),
   provider,
+  staticDirectory: existsSync(resolve(builtDashboard, "index.html"))
+    ? builtDashboard
+    : undefined,
   cacheTtlMs: readNumber("CACHE_TTL_MS", 60 * 60 * 1000),
   worker: {
     concurrency: readNumber("WORKER_CONCURRENCY", 2),

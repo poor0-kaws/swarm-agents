@@ -37,7 +37,7 @@ describe("research runs", () => {
     const completed = await waitForCompletedRun(server, created.id);
 
     expect(completed.status).toBe("completed");
-    expect(completed.report.executiveSummary).toContain("Semiconductor equipment");
+    expect(completed.report.executiveSummary).toContain("Verified synthesis for Semiconductor equipment");
     expect(completed.report.findings).toHaveLength(5);
     expect(completed.usage.requests).toBe(7);
     expect(completed.usage.inputTokens).toBeGreaterThan(0);
@@ -242,6 +242,41 @@ describe("research runs", () => {
       status: "completed",
     });
   });
+
+  test("a running research request names the agent currently working", async () => {
+    const server = await createServer({
+      databasePath: ":memory:",
+      provider: new SimulatedResearchProvider({ delayMs: 15 }),
+      worker: { concurrency: 1, pollIntervalMs: 1 },
+    });
+    servers.push(server);
+
+    const runId = await createRun(server, "Precision agriculture");
+    const running = await waitForRunningAgent(server, runId);
+
+    expect(running.currentAgent).toBe("planner");
+    await waitForCompletedRun(server, runId);
+  });
+
+  test("deeper simulated research records a larger token budget", async () => {
+    const server = await createServer({
+      databasePath: ":memory:",
+      provider: new SimulatedResearchProvider({ delayMs: 1 }),
+      worker: { concurrency: 2, pollIntervalMs: 1 },
+    });
+    servers.push(server);
+
+    const quick = await submitRunAtDepth(server, "quick");
+    const deep = await submitRunAtDepth(server, "deep");
+    const [completedQuick, completedDeep] = await Promise.all([
+      waitForCompletedRun(server, quick),
+      waitForCompletedRun(server, deep),
+    ]);
+
+    expect(completedDeep.usage.inputTokens).toBeGreaterThan(completedQuick.usage.inputTokens);
+    expect(completedDeep.usage.outputTokens).toBeGreaterThan(completedQuick.usage.outputTokens);
+    expect(completedDeep.report.findings.length).toBeGreaterThan(completedQuick.report.findings.length);
+  });
 });
 
 class CountingProvider implements ResearchProvider {
@@ -313,6 +348,40 @@ async function createRun(server: ResearchServer, industry: string) {
   });
 
   return response.json<{ id: string }>().id;
+}
+
+async function submitRunAtDepth(server: ResearchServer, depth: "quick" | "deep") {
+  const response = await server.app.inject({
+    method: "POST",
+    url: "/api/runs",
+    payload: {
+      industry: "Rail infrastructure",
+      question: "Which suppliers have durable replacement demand?",
+      depth,
+    },
+  });
+
+  return response.json<{ id: string }>().id;
+}
+
+async function waitForRunningAgent(server: ResearchServer, runId: string) {
+  const timeoutAt = Date.now() + 2_000;
+
+  while (Date.now() < timeoutAt) {
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}`,
+    });
+    const run = response.json<any>();
+
+    if (run.status === "running" && run.currentAgent) {
+      return run;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 3));
+  }
+
+  throw new Error("Research run did not expose an active agent.");
 }
 
 async function waitForCompletedRun(server: ResearchServer, runId: string) {

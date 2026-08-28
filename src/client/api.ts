@@ -1,12 +1,19 @@
-export type RunStatus = "queued" | "running" | "retrying" | "completed" | "failed";
-export type ResearchDepth = "quick" | "standard" | "deep";
+import type {
+  BatchSummary,
+  ResearchDepth,
+  ResearchReport,
+  ReuseKind,
+  RunStatus,
+  UsageSummary,
+} from "../shared/contracts.js";
 
-export interface UsageSummary {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-}
+export type {
+  BatchSummary,
+  ResearchDepth,
+  ResearchReport,
+  RunStatus,
+  UsageSummary,
+} from "../shared/contracts.js";
 
 export interface ResearchRun {
   id: string;
@@ -14,28 +21,13 @@ export interface ResearchRun {
   question: string;
   depth: ResearchDepth;
   status: RunStatus;
-  reuseKind: "cached" | "deduplicated" | null;
+  currentAgent: string | null;
+  reuseKind: ReuseKind;
   sourceRunId: string | null;
   error: string | null;
   createdAt: string;
   completedAt: string | null;
   usage: UsageSummary;
-}
-
-export interface ResearchReport {
-  executiveSummary: string;
-  findings: Array<{
-    title: string;
-    detail: string;
-    confidence: "low" | "medium" | "high";
-  }>;
-  risks: string[];
-  sources: Array<{
-    title: string;
-    url: string;
-    sourceType: string;
-    publishedAt: string;
-  }>;
 }
 
 export interface RunDetail extends ResearchRun {
@@ -53,6 +45,10 @@ export interface RunDetail extends ResearchRun {
     inputTokens: number;
     outputTokens: number;
     estimatedCostUsd: number;
+  }>;
+  agents: Array<{
+    name: string;
+    purpose: string;
   }>;
 }
 
@@ -97,11 +93,15 @@ export async function createRun(input: CreateRunInput) {
 }
 
 export async function createBatch(input: CreateBatchInput) {
-  return request<{ id: string; name: string; runIds: string[] }>("/api/batches", {
+  return request<BatchSummary>("/api/batches", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+export async function getBatch(batchId: string) {
+  return request<BatchSummary>(`/api/batches/${batchId}`);
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {

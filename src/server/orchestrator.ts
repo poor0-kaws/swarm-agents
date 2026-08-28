@@ -18,6 +18,7 @@ export class ResearchOrchestrator {
     const outputs: AgentOutput[] = [];
 
     for (const agent of researchAgents) {
+      this.database.recordAgentStarted(runId, agent.name, this.now().toISOString());
       const result = await this.provider.runAgent({
         agent,
         request,
@@ -33,29 +34,30 @@ export class ResearchOrchestrator {
       );
     }
 
-    return buildReport(request, outputs);
+    const writerOutput = outputs.at(-1);
+
+    if (!writerOutput) {
+      throw new Error("The report writer did not return a result.");
+    }
+
+    return reportFromWriter(writerOutput, request.depth);
   }
 }
 
-function buildReport(request: ResearchRequest, outputs: AgentOutput[]): ResearchReport {
-  const usefulOutputs = outputs.filter((_, index) => index > 0 && index < outputs.length - 1);
+function reportFromWriter(
+  writerOutput: AgentOutput,
+  depth: ResearchRequest["depth"],
+): ResearchReport {
+  const findingLimits = {
+    quick: 3,
+    standard: 5,
+    deep: 6,
+  };
 
   return {
-    executiveSummary: `The ${request.industry} research swarm completed a ${request.depth} review of: ${request.question}`,
-    findings: usefulOutputs.flatMap((output) => {
-      const finding = output.findings[0];
-      return finding ? [finding] : [];
-    }),
-    risks: unique(outputs.flatMap((output) => output.risks)),
-    sources: uniqueByUrl(outputs.flatMap((output) => output.sources)),
+    executiveSummary: writerOutput.summary,
+    findings: writerOutput.findings.slice(0, findingLimits[depth]),
+    risks: writerOutput.risks,
+    sources: writerOutput.sources,
   };
-}
-
-function unique(values: string[]) {
-  return [...new Set(values)];
-}
-
-function uniqueByUrl(values: ResearchReport["sources"]) {
-  const byUrl = new Map(values.map((value) => [value.url, value]));
-  return [...byUrl.values()];
 }

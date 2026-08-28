@@ -44,6 +44,15 @@ Open `http://127.0.0.1:5173`.
 
 The default provider is simulated. It creates clearly labeled sample evidence so you can test the whole product without spending money or adding secrets.
 
+To run the production build locally:
+
+```bash
+pnpm build
+pnpm start
+```
+
+Open `http://127.0.0.1:4100`. The Fastify server serves both the API and the built dashboard.
+
 ## Use Groq
 
 Edit `.env`:

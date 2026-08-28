@@ -110,14 +110,14 @@ export class WorkerPool {
     const now = this.options.now();
     const availableAt = new Date(now.getTime() + delayMs).toISOString();
 
-    this.database.retryJob(
-      job.id,
-      job.run_id,
-      message,
-      now.toISOString(),
+    this.database.retryJob({
+      jobId: job.id,
+      runId: job.run_id,
+      errorMessage: message,
+      scheduledAt: now.toISOString(),
       availableAt,
-      job.attempts + 1,
+      nextAttempt: job.attempts + 1,
       delayMs,
-    );
+    });
   }
 }

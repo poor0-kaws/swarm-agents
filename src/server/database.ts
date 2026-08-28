@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -12,6 +10,8 @@ import type {
   RunEvent,
   RunStatus,
 } from "./domain.js";
+import type { BatchSummary } from "../shared/contracts.js";
+import { openResearchDatabase } from "./database-schema.js";
 
 interface RunRow {
   id: string;
@@ -20,6 +20,7 @@ interface RunRow {
   depth: ResearchRun["depth"];
   fingerprint: string;
   status: RunStatus;
+  current_agent: string | null;
   reuse_kind: ResearchRun["reuseKind"];
   source_run_id: string | null;
   report_json: string | null;
@@ -59,35 +60,27 @@ export interface QueueJob {
   locked_at: string | null;
 }
 
+export interface RetrySchedule {
+  jobId: string;
+  runId: string;
+  errorMessage: string;
+  scheduledAt: string;
+  availableAt: string;
+  nextAttempt: number;
+  delayMs: number;
+}
+
 interface BatchRow {
   id: string;
   name: string;
   created_at: string;
 }
 
-export interface BatchSummary {
-  id: string;
-  name: string;
-  status: "queued" | "running" | "completed" | "failed";
-  total: number;
-  completed: number;
-  failed: number;
-  runIds: string[];
-  createdAt: string;
-}
-
 export class ResearchDatabase {
   private readonly database: DatabaseSync;
 
   constructor(path: string) {
-    if (path !== ":memory:") {
-      mkdirSync(dirname(path), { recursive: true });
-    }
-
-    this.database = new DatabaseSync(path);
-    this.database.exec("PRAGMA foreign_keys = ON;");
-    this.createSchema();
-    this.recoverInterruptedJobs();
+    this.database = openResearchDatabase(path);
   }
 
   close() {
@@ -102,6 +95,7 @@ export class ResearchDatabase {
       depth: request.depth,
       fingerprint,
       status: "queued",
+      currentAgent: null,
       reuseKind: null,
       sourceRunId: null,
       report: null,
@@ -117,10 +111,10 @@ export class ResearchDatabase {
     try {
       this.database.prepare(`
         INSERT INTO research_runs (
-          id, industry, question, depth, fingerprint, status, reuse_kind,
+          id, industry, question, depth, fingerprint, status, current_agent, reuse_kind,
           source_run_id, report_json, error, created_at, updated_at,
           started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         run.id,
         run.industry,
@@ -128,6 +122,7 @@ export class ResearchDatabase {
         run.depth,
         run.fingerprint,
         run.status,
+        run.currentAgent,
         run.reuseKind,
         run.sourceRunId,
         null,
@@ -195,6 +190,7 @@ export class ResearchDatabase {
       depth: request.depth,
       fingerprint,
       status: isCached ? "completed" : "queued",
+      currentAgent: null,
       reuseKind,
       sourceRunId: source.id,
       report: isCached ? source.report : null,
@@ -207,10 +203,10 @@ export class ResearchDatabase {
 
     this.database.prepare(`
       INSERT INTO research_runs (
-        id, industry, question, depth, fingerprint, status, reuse_kind,
+        id, industry, question, depth, fingerprint, status, current_agent, reuse_kind,
         source_run_id, report_json, error, created_at, updated_at,
         started_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       run.id,
       run.industry,
@@ -218,6 +214,7 @@ export class ResearchDatabase {
       run.depth,
       run.fingerprint,
       run.status,
+      run.currentAgent,
       run.reuseKind,
       run.sourceRunId,
       run.report ? JSON.stringify(run.report) : null,
@@ -353,15 +350,22 @@ export class ResearchDatabase {
     );
   }
 
-  retryJob(
-    jobId: string,
-    runId: string,
-    message: string,
-    now: string,
-    availableAt: string,
-    nextAttempt: number,
-    delayMs: number,
-  ) {
+  recordAgentStarted(runId: string, agentName: string, now: string) {
+    this.database.prepare(`
+      UPDATE research_runs
+      SET current_agent = ?, updated_at = ?
+      WHERE id = ?
+    `).run(agentName, now, runId);
+
+    this.insertEvent(
+      runId,
+      "agent.started",
+      `${agentName} started its assignment.`,
+      now,
+    );
+  }
+
+  retryJob(schedule: RetrySchedule) {
     this.database.exec("BEGIN IMMEDIATE;");
 
     try {
@@ -369,19 +373,19 @@ export class ResearchDatabase {
         UPDATE queue_jobs
         SET status = 'retrying', available_at = ?, locked_at = NULL, updated_at = ?
         WHERE id = ?
-      `).run(availableAt, now, jobId);
+      `).run(schedule.availableAt, schedule.scheduledAt, schedule.jobId);
 
       this.database.prepare(`
         UPDATE research_runs
-        SET status = 'retrying', error = ?, updated_at = ?
+        SET status = 'retrying', current_agent = NULL, error = ?, updated_at = ?
         WHERE id = ?
-      `).run(message, now, runId);
+      `).run(schedule.errorMessage, schedule.scheduledAt, schedule.runId);
 
       this.insertEvent(
-        runId,
+        schedule.runId,
         "run.retrying",
-        `Retry ${nextAttempt} scheduled in ${delayMs}ms.`,
-        now,
+        `Retry ${schedule.nextAttempt} scheduled in ${schedule.delayMs}ms.`,
+        schedule.scheduledAt,
       );
       this.database.exec("COMMIT;");
     } catch (error) {
@@ -498,7 +502,7 @@ export class ResearchDatabase {
 
       this.database.prepare(`
         UPDATE research_runs
-        SET status = 'completed', report_json = ?, error = NULL,
+        SET status = 'completed', current_agent = NULL, report_json = ?, error = NULL,
             updated_at = ?, completed_at = ?
         WHERE id = ?
       `).run(JSON.stringify(report), now, now, runId);
@@ -533,7 +537,7 @@ export class ResearchDatabase {
 
       this.database.prepare(`
         UPDATE research_runs
-        SET status = 'failed', error = ?, updated_at = ?, completed_at = ?
+        SET status = 'failed', current_agent = NULL, error = ?, updated_at = ?, completed_at = ?
         WHERE id = ?
       `).run(message, now, now, runId);
 
@@ -544,103 +548,6 @@ export class ResearchDatabase {
       this.database.exec("ROLLBACK;");
       throw error;
     }
-  }
-
-  private createSchema() {
-    this.database.exec(`
-      CREATE TABLE IF NOT EXISTS research_runs (
-        id TEXT PRIMARY KEY,
-        industry TEXT NOT NULL,
-        question TEXT NOT NULL,
-        depth TEXT NOT NULL,
-        fingerprint TEXT NOT NULL,
-        status TEXT NOT NULL,
-        reuse_kind TEXT,
-        source_run_id TEXT,
-        report_json TEXT,
-        error TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        started_at TEXT,
-        completed_at TEXT,
-        FOREIGN KEY (source_run_id) REFERENCES research_runs(id)
-      );
-
-      CREATE INDEX IF NOT EXISTS research_runs_fingerprint_index
-      ON research_runs(fingerprint, status);
-
-      CREATE TABLE IF NOT EXISTS queue_jobs (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL,
-        attempts INTEGER NOT NULL,
-        max_attempts INTEGER NOT NULL,
-        available_at TEXT NOT NULL,
-        locked_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (run_id) REFERENCES research_runs(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS run_events (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (run_id) REFERENCES research_runs(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS usage_records (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        agent_name TEXT NOT NULL,
-        model TEXT NOT NULL,
-        input_tokens INTEGER NOT NULL,
-        output_tokens INTEGER NOT NULL,
-        estimated_cost_usd REAL NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (run_id) REFERENCES research_runs(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS cache_entries (
-        fingerprint TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (run_id) REFERENCES research_runs(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS research_batches (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS research_batch_items (
-        batch_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
-        position INTEGER NOT NULL,
-        PRIMARY KEY (batch_id, run_id),
-        FOREIGN KEY (batch_id) REFERENCES research_batches(id),
-        FOREIGN KEY (run_id) REFERENCES research_runs(id)
-      );
-    `);
-  }
-
-  private recoverInterruptedJobs() {
-    const now = new Date().toISOString();
-    this.database.prepare(`
-      UPDATE queue_jobs
-      SET status = 'queued', locked_at = NULL, available_at = ?, updated_at = ?
-      WHERE status = 'active'
-    `).run(now, now);
-
-    this.database.prepare(`
-      UPDATE research_runs
-      SET status = 'queued', updated_at = ?
-      WHERE status = 'running'
-    `).run(now);
   }
 
   private insertEvent(runId: string, type: string, message: string, now: string) {
@@ -699,6 +606,7 @@ function mapRun(row: RunRow): ResearchRun {
     depth: row.depth,
     fingerprint: row.fingerprint,
     status: row.status,
+    currentAgent: row.current_agent,
     reuseKind: row.reuse_kind,
     sourceRunId: row.source_run_id,
     report: row.report_json ? JSON.parse(row.report_json) as ResearchReport : null,

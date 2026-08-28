@@ -17,11 +17,16 @@ export class SimulatedResearchProvider implements ResearchProvider {
   }
 
   async runAgent(input: Parameters<ResearchProvider["runAgent"]>[0]): Promise<ProviderResult> {
-    await delay(this.delayMs);
+    const depthMultiplier = multiplierForDepth(input.request.depth);
+    await delay(Math.max(1, Math.round(this.delayMs * depthMultiplier)));
 
-    const output = createOutput(input.agent.name, input.request.industry);
-    const inputTokens = 180 + input.previousOutputs.length * 45;
-    const outputTokens = input.agent.name === "report-writer" ? 360 : 140;
+    const output = createOutput(
+      input.agent.name,
+      input.request.industry,
+      input.previousOutputs,
+    );
+    const inputTokens = Math.round((180 + input.previousOutputs.length * 45) * depthMultiplier);
+    const outputTokens = Math.round((input.agent.name === "report-writer" ? 360 : 140) * depthMultiplier);
 
     return {
       output,
@@ -33,7 +38,15 @@ export class SimulatedResearchProvider implements ResearchProvider {
   }
 }
 
-function createOutput(agentName: string, industry: string): AgentOutput {
+function createOutput(
+  agentName: string,
+  industry: string,
+  previousOutputs: AgentOutput[],
+): AgentOutput {
+  if (agentName === "report-writer") {
+    return createWriterOutput(industry, previousOutputs);
+  }
+
   const findings = [
     {
       title: findingTitle(agentName),
@@ -57,6 +70,30 @@ function createOutput(agentName: string, industry: string): AgentOutput {
       },
     ],
   };
+}
+
+function createWriterOutput(industry: string, previousOutputs: AgentOutput[]): AgentOutput {
+  const researchOutputs = previousOutputs.slice(1);
+  const sourcesByUrl = new Map(
+    researchOutputs.flatMap((output) => output.sources).map((source) => [source.url, source]),
+  );
+
+  return {
+    summary: `Verified synthesis for ${industry}. The simulated provider demonstrates the workflow and must be replaced with live, licensed evidence for investment use.`,
+    findings: researchOutputs.flatMap((output) => output.findings),
+    risks: [...new Set(researchOutputs.flatMap((output) => output.risks))],
+    sources: [...sourcesByUrl.values()],
+  };
+}
+
+function multiplierForDepth(depth: "quick" | "standard" | "deep") {
+  const multipliers = {
+    quick: 0.6,
+    standard: 1,
+    deep: 1.8,
+  };
+
+  return multipliers[depth];
 }
 
 function findingTitle(agentName: string) {

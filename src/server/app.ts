@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { z } from "zod";
 
+import { researchAgents } from "./agents.js";
 import { ResearchDatabase } from "./database.js";
 import type { ResearchProvider, UsageSummary } from "./domain.js";
 import { ResearchOrchestrator } from "./orchestrator.js";
@@ -13,6 +15,7 @@ interface CreateServerOptions {
   databasePath: string;
   provider: ResearchProvider;
   cacheTtlMs?: number;
+  staticDirectory?: string;
   worker?: {
     concurrency?: number;
     pollIntervalMs?: number;
@@ -53,6 +56,12 @@ export async function createServer(options: CreateServerOptions): Promise<Resear
   const app = Fastify({ logger: false });
 
   await app.register(cors, { origin: true });
+
+  if (options.staticDirectory) {
+    await app.register(fastifyStatic, {
+      root: options.staticDirectory,
+    });
+  }
 
   app.get("/api/health", async () => ({ status: "ok" }));
 
@@ -95,6 +104,10 @@ export async function createServer(options: CreateServerOptions): Promise<Resear
       events: database.getEvents(run.id),
       usage: summarizeUsage(usageRecords),
       usageRecords,
+      agents: researchAgents.map((agent) => ({
+        name: agent.name,
+        purpose: agent.purpose,
+      })),
     };
   });
 

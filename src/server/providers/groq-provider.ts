@@ -161,8 +161,16 @@ function buildUserPrompt(input: Parameters<ResearchProvider["runAgent"]>[0]) {
 
 function mapBuiltInTools(tools: string[]) {
   const builtInTools = new Set<string>();
+  const toolsThatNeedSearch = [
+    "web-search",
+    "sec-filings",
+    "market-data",
+    "regulatory-data",
+    "source-checker",
+  ];
+  const needsWebSearch = tools.some((tool) => toolsThatNeedSearch.includes(tool));
 
-  if (tools.includes("web-search")) {
+  if (needsWebSearch) {
     builtInTools.add("web_search");
   }
 
