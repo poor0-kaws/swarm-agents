@@ -1,0 +1,19 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "pnpm install"
+run_mode = "concurrent"
+
+[scripts.run.dev]
+available_in = [ "local" ]
+command = "API_PORT=$((CONDUCTOR_PORT + 1)) pnpm dev"
+default = true
+icon = "play"
+
+[scripts.run.test]
+command = "pnpm test:watch"
+icon = "test-tube"
+
+[scripts.run.verify]
+command = "pnpm typecheck && pnpm test && pnpm build"
+icon = "check-check"
