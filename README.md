@@ -1,6 +1,6 @@
-# Market Swarm
+# Examen
 
-Market Swarm is a small financial-industry research system. You give it one question. It breaks the work into seven focused assignments, runs them through a central queue, and shows the result in a React dashboard.
+Examen is a small financial-industry research system. You give it one question. It breaks the work into seven focused assignments, runs them through a central queue, and shows the result in a React dashboard.
 
 The application is research software. It does not place trades and should not be treated as personalized investment advice.
 
